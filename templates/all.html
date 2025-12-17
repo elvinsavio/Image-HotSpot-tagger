@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Gallery</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            background: #111;
+            font-family: system-ui, sans-serif;
+        }
+
+        .gallery {
+            column-count: 5;
+            column-gap: 16px;
+        }
+
+        @media (max-width: 1600px) { .gallery { column-count: 4; } }
+        @media (max-width: 1200px) { .gallery { column-count: 3; } }
+        @media (max-width: 800px)  { .gallery { column-count: 2; } }
+        @media (max-width: 500px)  { .gallery { column-count: 1; } }
+
+        .item {
+            break-inside: avoid;
+            margin-bottom: 16px;
+        }
+
+        .item img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 6px;
+            background: #222;
+        }
+
+        .item img:hover {
+            outline: 2px solid white;
+        }
+    </style>
+</head>
+<body>
+
+<div class="gallery">
+    {% for image in images %}
+        <div class="item">
+           <a href="/image/{{ image }}"><img
+                src="{{ url_for('images', filename=image) }}"
+                alt="{{ image }}"
+                loading="lazy"
+            ></a>
+        </div>
+    {% endfor %}
+</div>
+
+</body>
+</html>
