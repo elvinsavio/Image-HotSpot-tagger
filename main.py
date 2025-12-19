@@ -10,7 +10,8 @@ DATA_FILE = "data.json"
 
 IMAGE_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
-def create_app(folder_path:  Path) -> Flask:
+
+def create_app(folder_path: Path) -> Flask:
     app = Flask(__name__)
     app.config["FOLDER_PATH"] = folder_path
 
@@ -35,7 +36,7 @@ def create_app(folder_path:  Path) -> Flask:
     @app.route("/images/<path:filename>")
     def images(filename):
         base_path: Path = app.config["FOLDER_PATH"]
-        base_path  = os.path.abspath(base_path)
+        base_path = os.path.abspath(base_path)
         return send_from_directory(base_path, filename)
 
     @app.route("/")
@@ -47,9 +48,9 @@ def create_app(folder_path:  Path) -> Flask:
             for p in base_path.iterdir()
             if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
         ]
-        print(images)
         # Example: return filenames as text
-        return render_template("all.html", images=images)
+        data = load_data()
+        return render_template("all.html", images=images, data=data)
 
     @app.route("/image/<string:image_name>")
     def tag_image(image_name: str):
@@ -60,17 +61,18 @@ def create_app(folder_path:  Path) -> Flask:
     @app.route("/api/save_tags", methods=["POST"])
     def save_tags_route():
         from flask import request, jsonify
+
         req_data = request.json
         image_name = req_data.get("image_name")
         tags = req_data.get("tags")
-        
+
         if not image_name:
-             return jsonify({"error": "Missing image_name"}), 400
-             
+            return jsonify({"error": "Missing image_name"}), 400
+
         data = load_data()
         data[image_name] = tags
         save_data(data)
-        
+
         return jsonify({"status": "success"})
 
     return app
@@ -80,11 +82,10 @@ def create_app(folder_path:  Path) -> Flask:
 @click.argument("path", required=True)
 def run(path):
     folder_path = Path(path)
-    
 
     if not folder_path.is_dir():
         raise ValueError(f"{path} is not a directory")
-    
+
     app = create_app(folder_path)
     app.run(debug=True)
 
