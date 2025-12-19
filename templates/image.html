@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tag Image: {{ image_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body class="editor-body">
+
+    <div id="main-container">
+        <div id="image-area">
+            <div id="img-wrapper">
+                <img id="target-image" src="{{ url_for('images', filename=image_name) }}" alt="Target Image">
+                <div id="overlay"></div>
+            </div>
+        </div>
+        <div id="sidebar">
+            <div id="sidebar-header">
+                <div>
+                    <a href="/" id="back-link">← Back to Gallery</a>
+                </div>
+                <div id="header-top">
+                    <h2>Image Tags</h2>
+                    <button id="save-btn" onclick="saveTags()">Save</button>
+                </div>
+            </div>
+            <div id="tags-list">
+                <div class="empty-state">Draw a box on the image to add a tag.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        // Initialize tags from server-side variable
+        let tags = {{ tags | tojson }};
+
+        let isDrawing = false;
+
+        let startX, startY;
+        let currentBoxId = null;
+        let draggedBox = null;
+        let resizeHandle = null; // 'nw', 'ne', etc.
+
+        // DOM Elements
+        const overlay = document.getElementById('overlay');
+        const tagsListEl = document.getElementById('tags-list');
+        const imgWrapper = document.getElementById('img-wrapper');
+        const targetImage = document.getElementById('target-image');
+
+        // Utils
+        function generateId() {
+            return 'tag_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // --- Drawing Logic ---
+
+        overlay.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('resize-handle')) {
+                // Resize start
+                e.stopPropagation();
+                // handled manually or via simpler logic? 
+                // Let's keep it simple: Drawing vs interacting
+                return;
+            }
+
+            if (e.target.classList.contains('hotspot-box')) {
+                // Select box
+                const id = e.target.dataset.id;
+                selectTag(id);
+
+                // Setup drag 
+                draggedBox = tags.find(t => t.id === id);
+                startX = e.offsetX; // relative to box? no, we need relative to overlay
+                startY = e.offsetY;
+                // But offsetX on the box is relative to the box.
+                // We need coordinates relative to overlay.
+                const rect = overlay.getBoundingClientRect();
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+
+                // Store initial pos for delta calculation
+                draggedBox._dragStartX = startX;
+                draggedBox._dragStartY = startY;
+                draggedBox._initialX = draggedBox.x;
+                draggedBox._initialY = draggedBox.y;
+
+                document.addEventListener('mousemove', onDragMove);
+                document.addEventListener('mouseup', onDragEnd);
+                return;
+            }
+
+            // Default: Start Drawing
+            isDrawing = true;
+            const rect = overlay.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+
+            // Create temp box
+            currentBoxId = generateId();
+            const box = document.createElement('div');
+            box.classList.add('hotspot-box');
+            box.dataset.id = currentBoxId;
+            box.style.left = startX + 'px';
+            box.style.top = startY + 'px';
+            box.style.width = '0px';
+            box.style.height = '0px';
+            overlay.appendChild(box);
+
+            document.addEventListener('mousemove', onDrawMove);
+            document.addEventListener('mouseup', onDrawEnd);
+        });
+
+        function onDrawMove(e) {
+            if (!isDrawing) return;
+            const rect = overlay.getBoundingClientRect();
+            let currentX = e.clientX - rect.left;
+            let currentY = e.clientY - rect.top;
+
+            // Constrain
+            currentX = Math.max(0, Math.min(currentX, rect.width));
+            currentY = Math.max(0, Math.min(currentY, rect.height));
+
+            const width = currentX - startX;
+            const height = currentY - startY;
+
+            const box = overlay.querySelector(`[data-id="${currentBoxId}"]`);
+            if (box) {
+                box.style.left = (width < 0 ? currentX : startX) + 'px';
+                box.style.top = (height < 0 ? currentY : startY) + 'px';
+                box.style.width = Math.abs(width) + 'px';
+                box.style.height = Math.abs(height) + 'px';
+            }
+        }
+
+        function onDrawEnd(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+            document.removeEventListener('mousemove', onDrawMove);
+            document.removeEventListener('mouseup', onDrawEnd);
+
+            const box = overlay.querySelector(`[data-id="${currentBoxId}"]`);
+            if (!box) return;
+
+            // Finalize
+            const w = parseFloat(box.style.width);
+            const h = parseFloat(box.style.height);
+            const l = parseFloat(box.style.left);
+            const t = parseFloat(box.style.top);
+
+            if (w < 5 || h < 5) {
+                // Too small, discard
+                box.remove();
+                return;
+            }
+
+            // Add to list
+            const newTag = {
+                id: currentBoxId,
+                x: l,
+                y: t,
+                w: w,
+                h: h,
+                description: "New Tag"
+            };
+            tags.push(newTag);
+
+            // Add handle and label to the box
+            addHandles(box);
+            addLabel(box, newTag.description);
+
+            renderTagsList();
+            selectTag(currentBoxId);
+        }
+
+        // --- Drag/Resize Logic (Simplified Drag) ---
+        function onDragMove(e) {
+            if (!draggedBox) return;
+            const rect = overlay.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+
+            const dx = currentX - draggedBox._dragStartX;
+            const dy = currentY - draggedBox._dragStartY;
+
+            const newX = draggedBox._initialX + dx;
+            const newY = draggedBox._initialY + dy;
+
+            // Update model
+            draggedBox.x = newX;
+            draggedBox.y = newY;
+
+            // Update DOM
+            const box = overlay.querySelector(`[data-id="${draggedBox.id}"]`);
+            if (box) {
+                box.style.left = newX + 'px';
+                box.style.top = newY + 'px';
+            }
+
+            updateTagListItem(draggedBox.id);
+        }
+
+        function onDragEnd() {
+            draggedBox = null;
+            document.removeEventListener('mousemove', onDragMove);
+            document.removeEventListener('mouseup', onDragEnd);
+        }
+
+        // --- Interaction ---
+        function selectTag(id) {
+            // Update UI classes
+            document.querySelectorAll('.hotspot-box').forEach(b => b.classList.remove('selected'));
+            document.querySelectorAll('.tag-item').forEach(t => t.classList.remove('active'));
+
+            const box = overlay.querySelector(`[data-id="${id}"]`);
+            if (box) box.classList.add('selected');
+
+            const item = document.getElementById(`list-item-${id}`);
+            if (item) {
+                item.classList.add('active');
+                item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function addHandles(boxElement) {
+            const positions = ['nw', 'ne', 'sw', 'se'];
+            positions.forEach(pos => {
+                const h = document.createElement('div');
+                h.classList.add('resize-handle', `rh-${pos}`);
+                h.dataset.pos = pos;
+                // Prevent drag propagation
+                h.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    startResize(e, boxElement.dataset.id, pos);
+                });
+                boxElement.appendChild(h);
+            });
+        }
+
+        function addLabel(boxElement, text) {
+            let label = boxElement.querySelector('.box-label');
+            if (!label) {
+                label = document.createElement('div');
+                label.className = 'box-label';
+                boxElement.appendChild(label);
+            }
+            label.textContent = text;
+        }
+
+        function startResize(e, id, pos) {
+            const tag = tags.find(t => t.id === id);
+            if (!tag) return;
+
+            const box = overlay.querySelector(`[data-id="${id}"]`);
+
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startW = tag.w;
+            const startH = tag.h;
+            const startL = tag.x;
+            const startT = tag.y;
+
+            function onResizeMove(ev) {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+
+                let newW = startW;
+                let newH = startH;
+                let newL = startL;
+                let newT = startT;
+
+                if (pos.includes('e')) newW = startW + dx;
+                if (pos.includes('s')) newH = startH + dy;
+                if (pos.includes('w')) {
+                    newW = startW - dx;
+                    newL = startL + dx;
+                }
+                if (pos.includes('n')) {
+                    newH = startH - dy;
+                    newT = startT + dy;
+                }
+
+                // Constrain min size
+                if (newW > 5 && newH > 5) {
+                    tag.w = newW;
+                    tag.h = newH;
+                    tag.x = newL;
+                    tag.y = newT;
+
+                    box.style.width = newW + 'px';
+                    box.style.height = newH + 'px';
+                    box.style.left = newL + 'px';
+                    box.style.top = newT + 'px';
+
+                    updateTagListItem(id);
+                }
+            }
+
+            function onResizeEnd() {
+                document.removeEventListener('mousemove', onResizeMove);
+                document.removeEventListener('mouseup', onResizeEnd);
+            }
+
+            document.addEventListener('mousemove', onResizeMove);
+            document.addEventListener('mouseup', onResizeEnd);
+        }
+
+        // --- Rendering List ---
+
+        function updateTagListItem(id) {
+            const tag = tags.find(t => t.id === id);
+            if (!tag) return;
+            const coordSpan = document.querySelector(`#list-item-${id} .tag-coords`);
+            if (coordSpan) {
+                coordSpan.innerText = `x:${Math.round(tag.x)}, y:${Math.round(tag.y)}, w:${Math.round(tag.w)}, h:${Math.round(tag.h)}`;
+            }
+        }
+
+        function renderTagsList() {
+            tagsListEl.innerHTML = '';
+
+            if (tags.length === 0) {
+                tagsListEl.innerHTML = '<div class="empty-state">Draw a box on the image to add a tag.</div>';
+                return;
+            }
+
+            tags.forEach(tag => {
+                const item = document.createElement('div');
+                item.className = 'tag-item';
+                item.id = `list-item-${tag.id}`;
+                item.addEventListener('mouseenter', () => {
+                    const box = overlay.querySelector(`[data-id="${tag.id}"]`);
+                    if (box) box.style.borderColor = '#fff';
+                });
+                item.addEventListener('mouseleave', () => {
+                    const box = overlay.querySelector(`[data-id="${tag.id}"]`);
+                    if (box) box.style.removeProperty('border-color');
+                });
+                item.addEventListener('click', () => selectTag(tag.id));
+
+                item.innerHTML = `
+                <div class="tag-header">
+                    <span class="tag-coords">x:${Math.round(tag.x)}, y:${Math.round(tag.y)}, w:${Math.round(tag.w)}, h:${Math.round(tag.h)}</span>
+                    <div class="tag-actions">
+                        <button class="delete-btn" onclick="deleteTag('${tag.id}')">×</button>
+                    </div>
+                </div>
+                <input type="text" class="tag-desc-input" value="${escapeHtml(tag.description)}" oninput="updateTagDescription('${tag.id}', this.value)">
+            `;
+                tagsListEl.appendChild(item);
+            });
+        }
+
+        function updateTagDescription(id, value) {
+            const tag = tags.find(t => t.id === id);
+            if (tag) {
+                tag.description = value;
+                const box = overlay.querySelector(`[data-id="${id}"]`);
+                if (box) {
+                    addLabel(box, value);
+                }
+            }
+        }
+
+        function saveTags() {
+            const btn = document.getElementById('save-btn');
+            const originalText = btn.innerText;
+            btn.innerText = 'Saving...';
+
+            fetch('/api/save_tags', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    image_name: "{{ image_name }}",
+                    tags: tags
+                })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        btn.innerText = 'Saved!';
+                        setTimeout(() => btn.innerText = originalText, 2000);
+                    } else {
+                        alert('Error saving tags');
+                        btn.innerText = originalText;
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Error saving tags');
+                    btn.innerText = originalText;
+                });
+        }
+
+        function deleteTag(id) {
+            tags = tags.filter(t => t.id !== id);
+            const box = overlay.querySelector(`[data-id="${id}"]`);
+            if (box) box.remove();
+            renderTagsList();
+        }
+
+        // Expose helpers globally or attach listener to window to handle inline onclicks cleaner?
+        // Using window attachment for simplicity of inline onclicks
+        window.deleteTag = deleteTag;
+        window.updateTagDescription = updateTagDescription;
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function (m) { return map[m]; });
+        }
+
+        // Initialize layout sync (optional: ensure overlay matches image if image loads late)
+        window.onload = function () {
+            const resizeObserver = new ResizeObserver(() => {
+                // Keep overlay 1:1 with image? 
+                // Wrapper does this automatically if configured right.
+                // With current CSS, overlay is 100% of #img-wrapper.
+                // But #img-wrapper needs to hug the image.
+
+                // Fix: make #img-wrapper inline-block or similar to fit content?
+                // Actually, standard way:
+                // Set image width/height.
+                // But we don't know image size.
+
+                // Let's force wrapper to shrink to image?
+                // If image is display:block and max-width/height, wrapper might be larger if block.
+                // display: flex + align-items: center in #image-area helps.
+
+                // Let's explicitly set wrapper size to image size
+                if (targetImage.complete) {
+                    syncOverlay();
+                } else {
+                    targetImage.onload = syncOverlay;
+                }
+            });
+            resizeObserver.observe(targetImage);
+
+            // Re-render tags from server init
+            if (tags.length > 0) {
+                tags.forEach(tag => {
+                    const box = document.createElement('div');
+                    box.classList.add('hotspot-box');
+                    box.dataset.id = tag.id;
+                    box.style.left = tag.x + 'px';
+                    box.style.top = tag.y + 'px';
+                    box.style.width = tag.w + 'px';
+                    box.style.height = tag.h + 'px';
+                    overlay.appendChild(box);
+                    addHandles(box);
+                    addLabel(box, tag.description);
+                });
+                renderTagsList();
+            }
+        }
+
+        function syncOverlay() {
+            // This ensures the wrapper is exactly the size of the rendered image
+            // so coordinates 0,0 are top-left of image
+            // img-wrapper is 'position: relative', if we set width/height it forces it.
+            // But allow image to scale naturally first.
+
+            // Actually, if we use display: inline-flex or similar on wrapper?
+            // Simpler: Just rely on the image.
+            // If tags are pixels relative to top/left of overlay, they must match image.
+        }
+
+    </script>
+
+</body>
+
+</html>
