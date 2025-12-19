@@ -30,14 +30,61 @@ body {
     column-gap: 16px;
 }
 
-@media (max-width: 1600px) { .gallery { column-count: 4; } }
-@media (max-width: 1200px) { .gallery { column-count: 3; } }
-@media (max-width: 800px)  { .gallery { column-count: 2; } }
-@media (max-width: 500px)  { .gallery { column-count: 1; } }
+@media (max-width: 1600px) {
+    .gallery {
+        column-count: 4;
+    }
+}
+
+@media (max-width: 1200px) {
+    .gallery {
+        column-count: 3;
+    }
+}
+
+@media (max-width: 800px) {
+    .gallery {
+        column-count: 2;
+    }
+}
+
+@media (max-width: 500px) {
+    .gallery {
+        column-count: 1;
+    }
+}
 
 .item {
     break-inside: avoid;
     margin-bottom: 16px;
+    position: relative;
+}
+
+.tag-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(20, 20, 20, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    pointer-events: none;
+    z-index: 5;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tag-indicator span.tick {
+    color: #4ade80;
+    font-weight: bold;
+    font-size: 1rem;
 }
 
 .item img {
@@ -51,8 +98,52 @@ body {
 
 .item img:hover {
     outline: 2px solid var(--accent-color);
-    transform: scale(1.02);
 }
+
+.item .outline {
+    outline: 2px solid var(--accent-color);
+}
+
+
+/* Hover Tags Overlay */
+.tags-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 10;
+}
+
+.item:hover .tags-overlay {
+    opacity: 1;
+}
+
+.tag-box {
+    position: absolute;
+    border: 2px solid var(--accent-color);
+    box-sizing: border-box;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+.tag-label {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    transform: translateY(100%);
+}
+
 
 /* Editor View (image.html) */
 .editor-body {
@@ -142,10 +233,29 @@ body {
     display: block;
 }
 
-.rh-nw { top: -5px; left: -5px; cursor: nw-resize; }
-.rh-ne { top: -5px; right: -5px; cursor: ne-resize; }
-.rh-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
-.rh-se { bottom: -5px; right: -5px; cursor: se-resize; }
+.rh-nw {
+    top: -5px;
+    left: -5px;
+    cursor: nw-resize;
+}
+
+.rh-ne {
+    top: -5px;
+    right: -5px;
+    cursor: ne-resize;
+}
+
+.rh-sw {
+    bottom: -5px;
+    left: -5px;
+    cursor: sw-resize;
+}
+
+.rh-se {
+    bottom: -5px;
+    right: -5px;
+    cursor: se-resize;
+}
 
 .box-label {
     position: absolute;
@@ -194,7 +304,9 @@ button {
     font-size: 0.8rem;
 }
 
-button:hover { background: #555; }
+button:hover {
+    background: #555;
+}
 
 #save-btn {
     background: #fff;
@@ -203,7 +315,10 @@ button:hover { background: #555; }
     padding: 6px 12px;
     align-self: flex-start;
 }
-#save-btn:hover { background: #ddd; }
+
+#save-btn:hover {
+    background: #ddd;
+}
 
 #back-link {
     color: #888;
@@ -212,7 +327,10 @@ button:hover { background: #555; }
     margin-bottom: 10px;
     display: inline-block;
 }
-#back-link:hover { color: #fff; }
+
+#back-link:hover {
+    color: #fff;
+}
 
 #tags-list {
     flex: 1;
@@ -258,17 +376,20 @@ button:hover { background: #555; }
     justify-content: flex-end;
 }
 
-button.delete-btn { 
-    background: #333; 
-    border: 1px solid #666; 
-    width: 20px; 
-    height: 20px; 
-    padding: 0; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
+button.delete-btn {
+    background: #333;
+    border: 1px solid #666;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-button.delete-btn:hover { background: #444; }
+
+button.delete-btn:hover {
+    background: #444;
+}
 
 .tag-desc-input {
     width: 100%;
@@ -280,6 +401,7 @@ button.delete-btn:hover { background: #444; }
     box-sizing: border-box;
     font-size: 0.9rem;
 }
+
 .tag-desc-input:focus {
     border-color: #777;
     outline: none;

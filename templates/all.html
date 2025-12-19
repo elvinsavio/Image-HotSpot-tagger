@@ -13,8 +13,22 @@
         <div class="gallery">
             {% for image in images %}
             <div class="item">
-                <a href="/image/{{ image }}"><img src="{{ url_for('images', filename=image) }}" alt="{{ image }}"
-                        loading="lazy"></a>
+                <a href="/image/{{ image }}" class="img-link">
+                    <img src="{{ url_for('images', filename=image) }}" alt="{{ image }}" loading="lazy">
+                    <div class="tags-overlay">
+                        {% for tag in data.get(image, []) %}
+                        <div class="tag-box"
+                            style="left: {{ tag.x }}%; top: {{ tag.y }}%; width: {{ tag.w }}%; height: {{ tag.h }}%;">
+                            <div class="tag-label">{{ tag.description }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </a>
+                <div class="tag-indicator">
+                    {% if data.get(image) %}
+                    <span class="tick">✓</span> {{ data[image]|length }}
+                    {% endif %}
+                </div>
             </div>
             {% endfor %}
         </div>
