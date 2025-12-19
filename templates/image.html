@@ -422,26 +422,6 @@
         // Initialize layout sync (optional: ensure overlay matches image if image loads late)
         window.onload = function () {
             const resizeObserver = new ResizeObserver(() => {
-                // Keep overlay 1:1 with image? 
-                // Wrapper does this automatically if configured right.
-                // With current CSS, overlay is 100% of #img-wrapper.
-                // But #img-wrapper needs to hug the image.
-
-                // Fix: make #img-wrapper inline-block or similar to fit content?
-                // Actually, standard way:
-                // Set image width/height.
-                // But we don't know image size.
-
-                // Let's force wrapper to shrink to image?
-                // If image is display:block and max-width/height, wrapper might be larger if block.
-                // display: flex + align-items: center in #image-area helps.
-
-                // Let's explicitly set wrapper size to image size
-                if (targetImage.complete) {
-                    syncOverlay();
-                } else {
-                    targetImage.onload = syncOverlay;
-                }
             });
             resizeObserver.observe(targetImage);
 
@@ -463,16 +443,7 @@
             }
         }
 
-        function syncOverlay() {
-            // This ensures the wrapper is exactly the size of the rendered image
-            // so coordinates 0,0 are top-left of image
-            // img-wrapper is 'position: relative', if we set width/height it forces it.
-            // But allow image to scale naturally first.
 
-            // Actually, if we use display: inline-flex or similar on wrapper?
-            // Simpler: Just rely on the image.
-            // If tags are pixels relative to top/left of overlay, they must match image.
-        }
 
     </script>
 
