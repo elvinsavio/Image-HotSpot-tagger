@@ -1,4 +1,3 @@
-# app.py
 import json
 import os
 from pathlib import Path
@@ -180,7 +179,7 @@ def run(path):
         raise ValueError(f"{path} is not a directory")
 
     app = create_app(folder_path)
-    app.run(debug=True)
+    app.run(debug=True, port=9000)
 
 
 if __name__ == "__main__":
