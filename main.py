@@ -75,6 +75,102 @@ def create_app(folder_path: Path) -> Flask:
 
         return jsonify({"status": "success"})
 
+    @app.route("/api/apply_blurs", methods=["POST"])
+    def apply_blurs():
+        from flask import request, jsonify
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance
+        import shutil
+
+        req_data = request.json
+        image_name = req_data.get("image_name")
+        blurs = req_data.get("blurs")  # List of {points: [{x,y}...], text: str}
+
+        if not image_name or not blurs:
+            return jsonify({"error": "Missing data"}), 400
+
+        image_path = app.config["FOLDER_PATH"] / image_name
+
+        # 1. Backup if not exists
+        backup_path = image_path.with_suffix(image_path.suffix + ".bak")
+        if not backup_path.exists():
+            shutil.copy2(image_path, backup_path)
+
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert("RGBA")  # Ensure alpha channel
+                width, height = img.size
+
+                # Base for drawing
+                draw = ImageDraw.Draw(img)
+
+                for b in blurs:
+                    points_pct = b.get("points", [])
+                    if len(points_pct) != 4:
+                        continue
+
+                    # Convert % to px
+                    poly_points = [
+                        (p["x"] * width / 100, p["y"] * height / 100)
+                        for p in points_pct
+                    ]
+
+                    # Create mask for this polygon
+                    mask = Image.new("L", (width, height), 0)
+                    mask_draw = ImageDraw.Draw(mask)
+                    mask_draw.polygon(poly_points, fill=255)
+
+                    # Create blurred version of the WHOLE image (strong blur)
+                    blurred = img.filter(ImageFilter.GaussianBlur(15))
+
+                    # Composite: Paste blurred onto img using mask
+                    img.paste(blurred, mask=mask)
+
+                    # Watermark
+                    text = b.get("text", "")
+                    if text:
+                        # Find center of polygon
+                        center_x = sum(p[0] for p in poly_points) / 4
+                        center_y = sum(p[1] for p in poly_points) / 4
+
+                        # Font size relative to poly height (approx)
+                        # Quick approx height
+                        poly_h = max(p[1] for p in poly_points) - min(
+                            p[1] for p in poly_points
+                        )
+                        font_size = max(12, int(poly_h * 0.4))
+
+                        try:
+                            font = ImageFont.truetype("arial.ttf", font_size)
+                        except:
+                            font = ImageFont.load_default(size=font_size)
+
+                        # Draw Text with outline for visibility
+                        # text_bbox = draw.textbbox((0, 0), text, font=font)
+                        # text_w = text_bbox[2] - text_bbox[0]
+                        # text_h = text_bbox[3] - text_bbox[1]
+
+                        draw.text(
+                            (center_x, center_y),
+                            text,
+                            font=font,
+                            anchor="mm",
+                            fill="white",
+                            stroke_width=2,
+                            stroke_fill="black",
+                        )
+
+                # Save back (convert to RGB if original was jpg/etc to avoid alpha issues if format doesn't support it)
+                if image_path.suffix.lower() in [".jpg", ".jpeg"]:
+                    img = img.convert("RGB")
+
+                img.save(image_path, quality=95)
+
+        except Exception as e:
+            print(f"Error blurring: {e}")
+            return jsonify({"error": str(e)}), 500
+
+        return jsonify({"status": "success"})
+
     return app
 
 

@@ -13,6 +13,7 @@
         <div id="image-area">
             <div id="img-wrapper">
                 <img id="target-image" src="{{ url_for('images', filename=image_name) }}" alt="Target Image">
+                <svg id="blur-overlay"></svg>
                 <div id="overlay"></div>
             </div>
         </div>
@@ -22,8 +23,15 @@
                     <a href="/" id="back-link">← Back to Gallery</a>
                 </div>
                 <div id="header-top">
-                    <h2>Image Tags</h2>
-                    <button id="save-btn" onclick="saveTags()">Save</button>
+                    <div class="mode-switch">
+                        <button id="mode-tag-btn" class="active" onclick="setMode('tag')">Tag</button>
+                        <button id="mode-blur-btn" onclick="setMode('blur')">Blur</button>
+                    </div>
+                </div>
+                <div id="header-actions">
+                    <button id="save-btn" onclick="saveTags()">Save Tags</button>
+                    <button id="burn-btn" onclick="burnBlurs()" style="display:none; background: #e63946;">Burn
+                        Blurs</button>
                 </div>
             </div>
             <div id="tags-list">
@@ -36,23 +44,53 @@
         // State
         // Initialize tags from server-side variable
         let tags = {{ tags | tojson }};
+        let blurs = []; // State for blurs {id, points: [{x,y}...], text: ''}
+        let currentMode = 'tag'; // 'tag' or 'blur'
 
         let isDrawing = false;
 
         let startX, startY;
-        let currentBoxId = null;
-        let draggedBox = null;
-        let resizeHandle = null; // 'nw', 'ne', etc.
+        let currentBoxId = null; // Used for both tags and blurs creation
+        let draggedBox = null;   // For Tag dragging
+        let draggedBlur = null;  // For Blur overall dragging (optional) or creation
+        let draggedHandle = null; // {blurId, pointIndex}
+
+        let resizeHandle = null; // 'nw', 'ne', etc. (Tags only)
 
         // DOM Elements
         const overlay = document.getElementById('overlay');
+        const blurOverlay = document.getElementById('blur-overlay');
         const tagsListEl = document.getElementById('tags-list');
         const imgWrapper = document.getElementById('img-wrapper');
         const targetImage = document.getElementById('target-image');
 
+        // Mode Switching
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('mode-tag-btn').className = mode === 'tag' ? 'active' : '';
+            document.getElementById('mode-blur-btn').className = mode === 'blur' ? 'active' : '';
+
+            // Toggle visibility
+            if (mode === 'tag') {
+                overlay.style.pointerEvents = 'auto';
+                // blurOverlay.style.pointerEvents = 'none';
+                document.getElementById('save-btn').style.display = 'inline-block';
+                document.getElementById('burn-btn').style.display = 'none';
+                renderTagsList(); // Show tags in sidebar
+            } else {
+                // blurOverlay.style.pointerEvents = 'auto';
+                // overlay.style.pointerEvents = 'none'; // We might still need overlay for capturing clicks?
+                // Actually, let's keep overlay capturing events, but logic differs
+                document.getElementById('save-btn').style.display = 'none';
+                document.getElementById('burn-btn').style.display = 'inline-block';
+                renderBlurList(); // Show blurs in sidebar
+            }
+            deselectAll();
+        }
+
         // Utils
         function generateId() {
-            return 'tag_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            return 'item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         }
 
         function toPercent(val, total) {
@@ -63,47 +101,49 @@
             return (percent / 100) * total;
         }
 
-        // --- Drawing Logic ---
-
+        // --- Overlay Event Delegation ---
         overlay.addEventListener('mousedown', (e) => {
+            if (currentMode === 'tag') {
+                handleTagMouseDown(e);
+            } else {
+                handleBlurMouseDown(e);
+            }
+        });
+
+        // Split logic functions
+        function handleTagMouseDown(e) {
             if (e.target.classList.contains('resize-handle')) {
-                // Resize start
-                e.stopPropagation();
-                // Handled in resize logic
+                // Handled in local resize logic if attached, but here we used global flow before.
+                // It was: e.stopPropagation in the element creation.
                 return;
             }
 
             if (e.target.classList.contains('hotspot-box')) {
-                // Select box
                 const id = e.target.dataset.id;
                 selectTag(id);
-
-                // Setup drag 
                 draggedBox = tags.find(t => t.id === id);
+                if (!draggedBox) return;
 
                 const rect = overlay.getBoundingClientRect();
                 startX = e.clientX - rect.left;
                 startY = e.clientY - rect.top;
 
-                // Drag start logic
-                // We'll store the initial mouse pos and initial tag pos (in %)
                 draggedBox._dragStartMouseX = startX;
                 draggedBox._dragStartMouseY = startY;
-                draggedBox._initialX = draggedBox.x; // %
-                draggedBox._initialY = draggedBox.y; // %
+                draggedBox._initialX = draggedBox.x;
+                draggedBox._initialY = draggedBox.y;
 
                 document.addEventListener('mousemove', onDragMove);
                 document.addEventListener('mouseup', onDragEnd);
                 return;
             }
 
-            // Default: Start Drawing
+            // Start Drawing Tag
             isDrawing = true;
             const rect = overlay.getBoundingClientRect();
             startX = e.clientX - rect.left;
             startY = e.clientY - rect.top;
 
-            // Create temp box
             currentBoxId = generateId();
             const box = document.createElement('div');
             box.classList.add('hotspot-box');
@@ -116,15 +156,53 @@
 
             document.addEventListener('mousemove', onDrawMove);
             document.addEventListener('mouseup', onDrawEnd);
-        });
+        }
 
+        function handleBlurMouseDown(e) {
+            // Check for handle click
+            if (e.target.classList.contains('quad-handle')) {
+                const blurId = e.target.dataset.blurId;
+                const pIdx = parseInt(e.target.dataset.pointIndex);
+                draggedHandle = { blurId, pIdx };
+                selectBlur(blurId);
+
+                document.addEventListener('mousemove', onBlurHandleDrag);
+                document.addEventListener('mouseup', onBlurHandleEnd);
+                return;
+            }
+
+            // Check if clicking inside a polygon (approximated by checking if SVG element is hit, but overlay covers it)
+            // Since overlay covers everything, we can't click the polygon directly unless we forward events or check raycast.
+            // For now: assume clicking anywhere else starts drawing a NEW blur.
+
+            isDrawing = true;
+            const rect = overlay.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+
+            currentBoxId = generateId();
+
+            // Visual feedback during draw: standard box
+            const box = document.createElement('div');
+            box.id = 'temp-blur-box';
+            box.style.position = 'absolute';
+            box.style.border = '2px dashed #e63946';
+            box.style.left = startX + 'px';
+            box.style.top = startY + 'px';
+            box.style.width = '0px';
+            box.style.height = '0px';
+            overlay.appendChild(box);
+
+            document.addEventListener('mousemove', onDrawBlurMove);
+            document.addEventListener('mouseup', onDrawBlurEnd);
+        }
+
+        // --- Tag Draw Handlers ---
         function onDrawMove(e) {
             if (!isDrawing) return;
             const rect = overlay.getBoundingClientRect();
             let currentX = e.clientX - rect.left;
             let currentY = e.clientY - rect.top;
-
-            // Constrain
             currentX = Math.max(0, Math.min(currentX, rect.width));
             currentY = Math.max(0, Math.min(currentY, rect.height));
 
@@ -133,7 +211,6 @@
 
             const box = overlay.querySelector(`[data-id="${currentBoxId}"]`);
             if (box) {
-                // Visualize in pixels while drawing
                 box.style.left = (width < 0 ? currentX : startX) + 'px';
                 box.style.top = (height < 0 ? currentY : startY) + 'px';
                 box.style.width = Math.abs(width) + 'px';
@@ -150,50 +227,116 @@
             const box = overlay.querySelector(`[data-id="${currentBoxId}"]`);
             if (!box) return;
 
-            // Finalize and convert to %
             const rect = overlay.getBoundingClientRect();
             const wPx = parseFloat(box.style.width);
             const hPx = parseFloat(box.style.height);
             const lPx = parseFloat(box.style.left);
             const tPx = parseFloat(box.style.top);
 
-            if (wPx < 5 || hPx < 5) {
-                // Too small, discard
-                box.remove();
-                return;
-            }
+            if (wPx < 5 || hPx < 5) { box.remove(); return; }
 
             const xPct = toPercent(lPx, rect.width);
             const yPct = toPercent(tPx, rect.height);
             const wPct = toPercent(wPx, rect.width);
             const hPct = toPercent(hPx, rect.height);
 
-            // Update box to use %
             box.style.left = xPct + '%';
             box.style.top = yPct + '%';
             box.style.width = wPct + '%';
             box.style.height = hPct + '%';
 
-            // Add to list
-            const newTag = {
-                id: currentBoxId,
-                x: xPct,
-                y: yPct,
-                w: wPct,
-                h: hPct,
-                description: "New Tag"
-            };
+            const newTag = { id: currentBoxId, x: xPct, y: yPct, w: wPct, h: hPct, description: "New Tag" };
             tags.push(newTag);
-
-            // Add handle and label to the box
             addHandles(box);
             addLabel(box, newTag.description);
-
             renderTagsList();
             selectTag(currentBoxId);
         }
 
-        // --- Drag/Resize Logic ---
+        // --- Blur Draw Handlers ---
+        function onDrawBlurMove(e) {
+            if (!isDrawing) return;
+            const rect = overlay.getBoundingClientRect();
+            let currentX = e.clientX - rect.left;
+            let currentY = e.clientY - rect.top;
+
+            const width = currentX - startX;
+            const height = currentY - startY;
+
+            const box = document.getElementById('temp-blur-box');
+            if (box) {
+                box.style.left = (width < 0 ? currentX : startX) + 'px';
+                box.style.top = (height < 0 ? currentY : startY) + 'px';
+                box.style.width = Math.abs(width) + 'px';
+                box.style.height = Math.abs(height) + 'px';
+            }
+        }
+
+        function onDrawBlurEnd(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+            document.removeEventListener('mousemove', onDrawBlurMove);
+            document.removeEventListener('mouseup', onDrawBlurEnd);
+
+            const box = document.getElementById('temp-blur-box');
+            if (!box) return;
+
+            const rect = overlay.getBoundingClientRect();
+            const wPx = parseFloat(box.style.width);
+            const hPx = parseFloat(box.style.height);
+            const lPx = parseFloat(box.style.left);
+            const tPx = parseFloat(box.style.top);
+            box.remove();
+
+            if (wPx < 5 || hPx < 5) return;
+
+            // Convert rect to 4 points (percentages)
+            const p1 = { x: toPercent(lPx, rect.width), y: toPercent(tPx, rect.height) }; // TL
+            const p2 = { x: toPercent(lPx + wPx, rect.width), y: toPercent(tPx, rect.height) }; // TR
+            const p3 = { x: toPercent(lPx + wPx, rect.width), y: toPercent(tPx + hPx, rect.height) }; // BR
+            const p4 = { x: toPercent(lPx, rect.width), y: toPercent(tPx + hPx, rect.height) }; // BL
+
+            const newBlur = {
+                id: currentBoxId,
+                points: [p1, p2, p3, p4], // standard order: TL, TR, BR, BL
+                text: ""
+            };
+            blurs.push(newBlur);
+            renderBlurs();
+            renderBlurList();
+            selectBlur(newBlur.id);
+        }
+
+        // --- Blur Edit Handlers ---
+        function onBlurHandleDrag(e) {
+            if (!draggedHandle) return;
+            const rect = overlay.getBoundingClientRect();
+            let cx = e.clientX - rect.left;
+            let cy = e.clientY - rect.top;
+
+            // Clamp
+            cx = Math.max(0, Math.min(cx, rect.width));
+            cy = Math.max(0, Math.min(cy, rect.height));
+
+            const blur = blurs.find(b => b.id === draggedHandle.blurId);
+            if (blur) {
+                blur.points[draggedHandle.pIdx] = {
+                    x: toPercent(cx, rect.width),
+                    y: toPercent(cy, rect.height)
+                };
+                renderBlurs(); // Re-render SVG and handles
+                // Don't re-render list continuously to avoid input focus loss? Actually list doesn't show coords
+            }
+        }
+
+        function onBlurHandleEnd() {
+            draggedHandle = null;
+            document.removeEventListener('mousemove', onBlurHandleDrag);
+            document.removeEventListener('mouseup', onBlurHandleEnd);
+        }
+
+
+        // --- Tag Drag/Resize Logic ---
         function onDragMove(e) {
             if (!draggedBox) return;
             const rect = overlay.getBoundingClientRect();
@@ -209,21 +352,17 @@
             let newX = draggedBox._initialX + dxPct;
             let newY = draggedBox._initialY + dyPct;
 
-            // Constrain
             newX = Math.max(0, Math.min(newX, 100 - draggedBox.w));
             newY = Math.max(0, Math.min(newY, 100 - draggedBox.h));
 
-            // Update model
             draggedBox.x = newX;
             draggedBox.y = newY;
 
-            // Update DOM
             const box = overlay.querySelector(`[data-id="${draggedBox.id}"]`);
             if (box) {
                 box.style.left = newX + '%';
                 box.style.top = newY + '%';
             }
-
             updateTagListItem(draggedBox.id);
         }
 
@@ -243,49 +382,28 @@
             const startMouseX = e.clientX;
             const startMouseY = e.clientY;
 
-            const startW = tag.w; // %
-            const startH = tag.h; // %
-            const startX = tag.x; // %
-            const startY = tag.y; // %
+            const startW = tag.w;
+            const startH = tag.h;
+            const startX = tag.x;
+            const startY = tag.y;
 
             function onResizeMove(ev) {
                 const dxPx = ev.clientX - startMouseX;
                 const dyPx = ev.clientY - startMouseY;
-
                 const dxPct = toPercent(dxPx, rect.width);
                 const dyPct = toPercent(dyPx, rect.height);
 
-                let newW = startW;
-                let newH = startH;
-                let newX = startX;
-                let newY = startY;
+                let newW = startW, newH = startH, newX = startX, newY = startY;
 
                 if (pos.includes('e')) newW = startW + dxPct;
                 if (pos.includes('s')) newH = startH + dyPct;
-                if (pos.includes('w')) {
-                    newW = startW - dxPct;
-                    newX = startX + dxPct;
-                }
-                if (pos.includes('n')) {
-                    newH = startH - dyPct;
-                    newY = startY + dyPct;
-                }
+                if (pos.includes('w')) { newW = startW - dxPct; newX = startX + dxPct; }
+                if (pos.includes('n')) { newH = startH - dyPct; newY = startY + dyPct; }
 
-                // Min size check (approx 5px in %)
-                const minWPct = toPercent(5, rect.width);
-                const minHPct = toPercent(5, rect.height);
-
-                if (newW > minWPct && newH > minHPct) {
-                    tag.w = newW;
-                    tag.h = newH;
-                    tag.x = newX;
-                    tag.y = newY;
-
-                    box.style.width = newW + '%';
-                    box.style.height = newH + '%';
-                    box.style.left = newX + '%';
-                    box.style.top = newY + '%';
-
+                if (newW > 1 && newH > 1) { // Min size
+                    tag.w = newW; tag.h = newH; tag.x = newX; tag.y = newY;
+                    box.style.width = newW + '%'; box.style.height = newH + '%';
+                    box.style.left = newX + '%'; box.style.top = newY + '%';
                     updateTagListItem(id);
                 }
             }
@@ -294,25 +412,51 @@
                 document.removeEventListener('mousemove', onResizeMove);
                 document.removeEventListener('mouseup', onResizeEnd);
             }
-
             document.addEventListener('mousemove', onResizeMove);
             document.addEventListener('mouseup', onResizeEnd);
         }
 
         // --- Interaction ---
         function selectTag(id) {
-            // Update UI classes
-            document.querySelectorAll('.hotspot-box').forEach(b => b.classList.remove('selected'));
-            document.querySelectorAll('.tag-item').forEach(t => t.classList.remove('active'));
-
+            if (currentMode !== 'tag') return;
+            deselectAll();
             const box = overlay.querySelector(`[data-id="${id}"]`);
             if (box) box.classList.add('selected');
-
             const item = document.getElementById(`list-item-${id}`);
             if (item) {
                 item.classList.add('active');
                 item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+        }
+
+        function selectBlur(id) {
+            if (currentMode !== 'blur') return;
+            deselectAll();
+
+            // Highlight SVG poly
+            const poly = document.getElementById(`poly-${id}`);
+            if (poly) poly.classList.add('selected');
+
+            // Show handles
+            const blur = blurs.find(b => b.id === id);
+            if (blur) renderBlurHandles(blur);
+
+            // Highlight list item
+            const item = document.getElementById(`blur-item-${id}`);
+            if (item) {
+                item.classList.add('active');
+            }
+        }
+
+        function deselectAll() {
+            // Tags
+            document.querySelectorAll('.hotspot-box').forEach(b => b.classList.remove('selected'));
+            document.querySelectorAll('.tag-item').forEach(t => t.classList.remove('active'));
+
+            // Blurs
+            document.querySelectorAll('polygon').forEach(p => p.classList.remove('selected'));
+            // Remove all handles
+            document.querySelectorAll('.quad-handle').forEach(h => h.remove());
         }
 
         function addHandles(boxElement) {
@@ -321,7 +465,6 @@
                 const h = document.createElement('div');
                 h.classList.add('resize-handle', `rh-${pos}`);
                 h.dataset.pos = pos;
-                // Prevent drag propagation
                 h.addEventListener('mousedown', (e) => {
                     e.stopPropagation();
                     startResize(e, boxElement.dataset.id, pos);
@@ -340,50 +483,130 @@
             label.textContent = text;
         }
 
+        // --- Rendering Blurs ---
 
-        // --- Rendering List ---
+        function renderBlurs() {
+            // Keep handles if same selection? re-render all to be safe for now
+            // But we might be dragging a handle, so we need to move handles efficiently OR just re-render handles for selected only
+
+            // 1. Clear SVG
+            blurOverlay.innerHTML = '';
+
+            // 2. Draw polygons
+            blurs.forEach(b => {
+                const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                // Points key is x,y in % -> need 0-100 coords for SVG if we set viewBox? 
+                // Easier: Set viewBox to "0 0 100 100" preservingAspectRatio="none" on SVG
+                // Then points are just x,y
+
+                const pointsStr = b.points.map(p => `${p.x},${p.y}`).join(' ');
+                poly.setAttribute('points', pointsStr);
+                poly.id = `poly-${b.id}`;
+                poly.addEventListener('mousedown', (e) => {
+                    // Start selecting this blur
+                    // Need to stop prop?
+                    // e.stopPropagation(); // Let overlay capture?? No, overlay is ON TOP of SVG usually due to zindex?
+                    // Wait, SVG is z-index 5, overlay is 10. CSS says overlay pointer-events auto.
+                    // So overlay captures clicks. We can't click SVG directly unless overlay ignores events.
+                    // But overlay is needed for drawing new ones.
+
+                    // Solution: We handle selection in handleBlurMouseDown by checking "distance" or just relying solely on Sidebar selection + Creating new ones.
+                    // OR: In handleBlurMouseDown, we check if click is inside any existing poly.
+                });
+                blurOverlay.appendChild(poly);
+            });
+
+            // Re-add handles for selected
+            const selectedItem = document.querySelector('.tag-item.active');
+            // Note: tag-item class reused? No, create new class for blur items
+            // Actually checking internal state is better
+            // Find 'selected' poly
+            // But state isn't stored in DOM. 
+            // Let's rely on `draggedHandle` or just check which list item is active if possible, OR just re-render handles if we know which is selected.
+            // We'll pass logic to `renderBlurHandles` called by `selectBlur` locally.
+            // But if we are Dragging, we need updates.
+
+            if (draggedHandle) {
+                const blur = blurs.find(b => b.id === draggedHandle.blurId);
+                if (blur) renderBlurHandles(blur);
+            }
+        }
+
+        // Ensure SVG scales correctly
+        blurOverlay.setAttribute('viewBox', '0 0 100 100');
+        blurOverlay.setAttribute('preserveAspectRatio', 'none');
+
+        function renderBlurHandles(blur) {
+            // Remove existing handles
+            document.querySelectorAll('.quad-handle').forEach(h => h.remove());
+
+            blur.points.forEach((p, idx) => {
+                const h = document.createElement('div');
+                h.classList.add('quad-handle');
+                h.dataset.blurId = blur.id;
+                h.dataset.pointIndex = idx;
+                h.style.left = p.x + '%';
+                h.style.top = p.y + '%';
+                h.style.display = 'block';
+                overlay.appendChild(h); // Append to OVERLAY so it's on top and clickable
+            });
+        }
+
+        // --- Lists Rendering ---
 
         function updateTagListItem(id) {
             const tag = tags.find(t => t.id === id);
             if (!tag) return;
             const coordSpan = document.querySelector(`#list-item-${id} .tag-coords`);
             if (coordSpan) {
-                // Show formatted percentages
                 coordSpan.innerText = `x:${tag.x.toFixed(2)}%, y:${tag.y.toFixed(2)}%`;
             }
         }
 
         function renderTagsList() {
             tagsListEl.innerHTML = '';
-
             if (tags.length === 0) {
                 tagsListEl.innerHTML = '<div class="empty-state">Draw a box on the image to add a tag.</div>';
                 return;
             }
-
             tags.forEach(tag => {
                 const item = document.createElement('div');
                 item.className = 'tag-item';
                 item.id = `list-item-${tag.id}`;
-                item.addEventListener('mouseenter', () => {
-                    const box = overlay.querySelector(`[data-id="${tag.id}"]`);
-                    if (box) box.style.borderColor = '#fff';
-                });
-                item.addEventListener('mouseleave', () => {
-                    const box = overlay.querySelector(`[data-id="${tag.id}"]`);
-                    if (box) box.style.removeProperty('border-color');
-                });
-                item.addEventListener('click', () => selectTag(tag.id));
-
                 item.innerHTML = `
                 <div class="tag-header">
                     <span class="tag-coords">x:${tag.x.toFixed(2)}%, y:${tag.y.toFixed(2)}%</span>
-                    <div class="tag-actions">
-                        <button class="delete-btn" onclick="deleteTag('${tag.id}')">×</button>
-                    </div>
+                    <button class="delete-btn" onclick="deleteTag('${tag.id}')">×</button>
                 </div>
                 <input type="text" class="tag-desc-input" value="${escapeHtml(tag.description)}" oninput="updateTagDescription('${tag.id}', this.value)">
-            `;
+                `;
+                item.addEventListener('click', (e) => {
+                    if (!e.target.closest('input') && !e.target.closest('button')) selectTag(tag.id);
+                });
+                tagsListEl.appendChild(item);
+            });
+        }
+
+        function renderBlurList() {
+            tagsListEl.innerHTML = '';
+            if (blurs.length === 0) {
+                tagsListEl.innerHTML = '<div class="empty-state">Draw an area to blur. Drag corners to adjust.</div>';
+                return;
+            }
+            blurs.forEach(b => {
+                const item = document.createElement('div');
+                item.className = 'tag-item'; // Reuse styles
+                item.id = `blur-item-${b.id}`;
+                item.innerHTML = `
+                 <div class="tag-header">
+                    <span class="tag-coords">Blur Region</span>
+                    <button class="delete-btn" onclick="deleteBlur('${b.id}')">×</button>
+                </div>
+                <input type="text" class="tag-desc-input" placeholder="Watermark (Optional)" value="${escapeHtml(b.text)}" oninput="updateBlurText('${b.id}', this.value)">
+                `;
+                item.addEventListener('click', (e) => {
+                    if (!e.target.closest('input') && !e.target.closest('button')) selectBlur(b.id);
+                });
                 tagsListEl.appendChild(item);
             });
         }
@@ -393,11 +616,16 @@
             if (tag) {
                 tag.description = value;
                 const box = overlay.querySelector(`[data-id="${id}"]`);
-                if (box) {
-                    addLabel(box, value);
-                }
+                if (box) addLabel(box, value);
             }
         }
+
+        function updateBlurText(id, value) {
+            const b = blurs.find(x => x.id === id);
+            if (b) b.text = value;
+        }
+
+        // --- Actions ---
 
         function saveTags() {
             const btn = document.getElementById('save-btn');
@@ -406,13 +634,8 @@
 
             fetch('/api/save_tags', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    image_name: "{{ image_name }}",
-                    tags: tags // Already in percentages
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_name: "{{ image_name }}", tags: tags })
             })
                 .then(res => res.json())
                 .then(data => {
@@ -431,6 +654,34 @@
                 });
         }
 
+        function burnBlurs() {
+            const btn = document.getElementById('burn-btn');
+            const originalText = btn.innerText;
+            btn.innerText = 'Burning...';
+
+            fetch('/api/apply_blurs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_name: "{{ image_name }}", blurs: blurs })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        btn.innerText = 'Done!';
+                        // Reload to see changes
+                        location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                        btn.innerText = originalText;
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Error connecting to server');
+                    btn.innerText = originalText;
+                });
+        }
+
         function deleteTag(id) {
             tags = tags.filter(t => t.id !== id);
             const box = overlay.querySelector(`[data-id="${id}"]`);
@@ -438,29 +689,29 @@
             renderTagsList();
         }
 
+        function deleteBlur(id) {
+            blurs = blurs.filter(b => b.id !== id);
+            renderBlurs();
+            renderBlurList();
+        }
+
         window.deleteTag = deleteTag;
+        window.deleteBlur = deleteBlur;
         window.updateTagDescription = updateTagDescription;
+        window.updateBlurText = updateBlurText;
 
         function escapeHtml(text) {
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
             return text.replace(/[&<>"']/g, function (m) { return map[m]; });
         }
 
         // Initialize
         window.onload = function () {
-            // Re-render tags from server init
             if (tags.length > 0) {
                 tags.forEach(tag => {
                     const box = document.createElement('div');
                     box.classList.add('hotspot-box');
                     box.dataset.id = tag.id;
-                    // Assume loaded tags are in percentages
                     box.style.left = tag.x + '%';
                     box.style.top = tag.y + '%';
                     box.style.width = tag.w + '%';
@@ -471,6 +722,9 @@
                 });
                 renderTagsList();
             }
+            // Setup SVG attrs
+            blurOverlay.setAttribute('viewBox', '0 0 100 100');
+            blurOverlay.setAttribute('preserveAspectRatio', 'none');
         }
 
     </script>
