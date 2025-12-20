@@ -205,68 +205,6 @@ body {
     z-index: 10;
 }
 
-#blur-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 5;
-    pointer-events: none;
-}
-
-polygon {
-    fill: rgba(255, 0, 0, 0.3);
-    stroke: rgba(255, 0, 0, 0.8);
-    stroke-width: 2;
-    vector-effect: non-scaling-stroke;
-}
-
-polygon.selected {
-    fill: rgba(255, 0, 0, 0.5);
-    stroke: #fff;
-    stroke-width: 2;
-}
-
-/* Handles for Quads */
-.quad-handle {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    background: #fff;
-    border: 2px solid #e63946;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    cursor: move;
-    z-index: 30;
-    display: none;
-}
-
-.mode-switch {
-    display: flex;
-    gap: 0;
-    background: #333;
-    border-radius: 6px;
-    padding: 2px;
-}
-
-.mode-switch button {
-    background: transparent;
-    border-radius: 4px;
-    padding: 4px 12px;
-}
-
-.mode-switch button.active {
-    background: #555;
-    font-weight: bold;
-}
-
-#header-actions {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 10px;
-}
-
 .hotspot-box {
     position: absolute;
     border: 2px solid var(--box-border);
