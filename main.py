@@ -1,10 +1,12 @@
 # app.py
-import os
-import click
-from flask import Flask, render_template, send_from_directory
-from pathlib import Path
-from typing import List, Dict, Any
 import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+import click
+from flask import Flask, jsonify, render_template, request, send_from_directory
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 DATA_FILE = "data.json"
 
@@ -50,6 +52,10 @@ def create_app(folder_path: Path) -> Flask:
         ]
         # Example: return filenames as text
         data = load_data()
+
+        # Sort images: fewer tags first
+        images.sort(key=lambda x: len(data.get(x, [])))
+
         return render_template("all.html", images=images, data=data)
 
     @app.route("/image/<string:image_name>")
@@ -60,7 +66,7 @@ def create_app(folder_path: Path) -> Flask:
 
     @app.route("/api/save_tags", methods=["POST"])
     def save_tags_route():
-        from flask import request, jsonify
+        from flask import jsonify, request
 
         req_data = request.json
         image_name = req_data.get("image_name")
@@ -77,10 +83,6 @@ def create_app(folder_path: Path) -> Flask:
 
     @app.route("/api/apply_blurs", methods=["POST"])
     def apply_blurs():
-        from flask import request, jsonify
-        from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance
-        import shutil
-
         req_data = request.json
         image_name = req_data.get("image_name")
         blurs = req_data.get("blurs")  # List of {points: [{x,y}...], text: str}
@@ -89,11 +91,6 @@ def create_app(folder_path: Path) -> Flask:
             return jsonify({"error": "Missing data"}), 400
 
         image_path = app.config["FOLDER_PATH"] / image_name
-
-        # 1. Backup if not exists
-        backup_path = image_path.with_suffix(image_path.suffix + ".bak")
-        if not backup_path.exists():
-            shutil.copy2(image_path, backup_path)
 
         try:
             with Image.open(image_path) as img:
