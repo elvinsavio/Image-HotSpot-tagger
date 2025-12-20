@@ -28,6 +28,10 @@
                         <button id="mode-blur-btn" onclick="setMode('blur')">Blur</button>
                     </div>
                 </div>
+                <div id="blur-warning"
+                    style="display:none; color: #ff6b6b; font-size: 0.8rem; margin-top: 5px; background: rgba(255, 0, 0, 0.1); padding: 5px; border-radius: 4px;">
+                    ⚠️ Destructive: Changes are permanent. Make a backup!
+                </div>
                 <div id="header-actions">
                     <button id="save-btn" onclick="saveTags()">Save Tags</button>
                     <button id="burn-btn" onclick="burnBlurs()" style="display:none; background: #e63946;">Burn
@@ -76,6 +80,7 @@
                 // blurOverlay.style.pointerEvents = 'none';
                 document.getElementById('save-btn').style.display = 'inline-block';
                 document.getElementById('burn-btn').style.display = 'none';
+                document.getElementById('blur-warning').style.display = 'none';
                 renderTagsList(); // Show tags in sidebar
             } else {
                 // blurOverlay.style.pointerEvents = 'auto';
@@ -83,6 +88,7 @@
                 // Actually, let's keep overlay capturing events, but logic differs
                 document.getElementById('save-btn').style.display = 'none';
                 document.getElementById('burn-btn').style.display = 'inline-block';
+                document.getElementById('blur-warning').style.display = 'block';
                 renderBlurList(); // Show blurs in sidebar
             }
             deselectAll();
